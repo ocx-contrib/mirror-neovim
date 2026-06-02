@@ -22,8 +22,8 @@ assets:
     - "^nvim-macos-x86_64\\.tar\\.gz$"
   darwin/arm64:
     - "^nvim-macos-arm64\\.tar\\.gz$"
-  # windows/amd64:
-  #   - "^nvim-win64\\.zip$"
+  windows/amd64:
+    - "^nvim-win64\\.zip$"
   # windows/arm64 intentionally omitted: nvim-win-arm64.zip first ships at
   # v0.11.7, so it is absent for v0.11.0..v0.11.6. With cascade + min 0.11.0
   # an arm64 pattern would fail those builds. Re-add with a min bump to 0.11.7
@@ -71,9 +71,9 @@ platforms:
     runner: macos-14
   darwin/arm64:
     runner: macos-14
-  # windows/amd64:
-  #   runner: windows-latest
-  #   shell: pwsh
+  windows/amd64:
+    runner: windows-latest
+    shell: pwsh
 
 notify:
   discord:
