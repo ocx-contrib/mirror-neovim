@@ -1,0 +1,131 @@
+extends: ../mirror-base.yml
+
+name: neovim
+
+# Logical index package `neovim/neovim` at the physical path
+# `ghcr.io/ocx-contrib/neovim/neovim` — slash segments, never hyphen-flattened.
+# The first segment must be this repo's own GitHub owner: GITHUB_TOKEN only
+# authorises packages owned by the repo the workflow runs in.
+#
+# Succeeds the flat `ocx.sh/neovim` coordinate this repository published before
+# the grouped layout, the same way mirror-kitware/cmake succeeds mirror-cmake.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/neovim/neovim
+
+source:
+  type: github_release
+  owner: neovim
+  repo: neovim
+  tag_pattern: "^v(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# Neovim is a C build linked against the system libc. Upstream ships ONE Linux
+# archive per arch and it is NOT static. Measured on v0.12.4 (`bin/nvim` inside
+# each tarball):
+#
+#   $ file nvim-linux-x86_64/bin/nvim
+#   ELF 64-bit LSB pie executable, x86-64, dynamically linked,
+#     interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0
+#   $ readelf -d … | grep NEEDED
+#   libm.so.6, libgcc_s.so.1, libc.so.6, ld-linux-x86-64.so.2
+#
+#   $ file nvim-linux-arm64/bin/nvim
+#   ELF 64-bit LSB pie executable, ARM aarch64, dynamically linked,
+#     interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0
+#   $ readelf -d … | grep NEEDED
+#   libm.so.6, libgcc_s.so.1, libc.so.6, ld-linux-aarch64.so.1
+#
+# A PT_INTERP naming the glibc loader is a HARD host requirement, so both Linux
+# keys carry `+libc.glibc`. Upstream publishes no musl/alpine asset (the release
+# asset list is linux x86_64/arm64, macos x86_64/arm64, win64/win-arm64 and
+# nothing else), so there is no `+libc.musl` counterpart to declare. The one
+# non-base DT_NEEDED, `libgcc_s.so.1`, ships in both container base images.
+#
+# The suffix goes on BOTH the `assets:` key here and the `platforms:` key in
+# ../mirror-base.yml — they are the same platform identifier.
+#
+# ─── Scope (verified against v0.11.0, the first in-range release, v0.11.5,
+# where windows/arm64 appears, and v0.12.4, the newest)
+#
+# Upstream also publishes, and this mirror deliberately does not carry:
+#   nvim-linux-{x86_64,arm64}.appimage(.zsync)  — self-mounting image, not a tree
+#   nvim-win64.msi / nvim-win-arm64.msi         — installer, not a portable tree
+#   shasum.txt                                  — sidecar
+#
+# The anchored ^…$ regexes are what keep those out — `^nvim-linux-x86_64\.tar\.gz$`
+# does not match the `.appimage`, and `^nvim-win-arm64\.zip$` does not match the
+# `.msi`. Resolution verified BOTH ways: each pattern matches EXACTLY one asset
+# in every release inside its own window. A pattern matching zero is silently
+# skipped, not an error — it would yield a green run with a missing platform,
+# which is why `nvim-win-arm64.zip` is gated by
+# `platforms.windows/arm64.min_version` rather than merely declared.
+assets:
+  "linux/amd64+libc.glibc":
+    - "^nvim-linux-x86_64\\.tar\\.gz$"
+  "linux/arm64+libc.glibc":
+    - "^nvim-linux-arm64\\.tar\\.gz$"
+  darwin/amd64:
+    - "^nvim-macos-x86_64\\.tar\\.gz$"
+  darwin/arm64:
+    - "^nvim-macos-arm64\\.tar\\.gz$"
+  windows/amd64:
+    - "^nvim-win64\\.zip$"
+  windows/arm64:
+    - "^nvim-win-arm64\\.zip$"
+
+asset_type:
+  # Every asset wraps a single `nvim-<plat>/` directory, so one strip lands
+  # `bin/`, `lib/` and `share/` at the content root — identical on all six
+  # platforms, hence no per-platform override.
+  type: archive
+  strip_components: 1
+
+metadata:
+  # Two claims, because the binary set is platform-asymmetric. Linux and macOS
+  # ship exactly `bin/nvim`; Windows ships three more executables in the same
+  # `bin/` (`win32yank.exe`, `xxd.exe`, and `tee.exe` from v0.11.6 on). Under
+  # `bin_scan: verify` an undeclared on-PATH executable reds the run, so the
+  # Windows legs cannot share the default file. `tee` is declared for the whole
+  # Windows range — a declared name merely ABSENT from disk is legal, which is
+  # what keeps v0.11.0..v0.11.5 green.
+  #
+  # Paths here resolve against THIS spec's directory (unlike `tests[].script`).
+  default: metadata.json
+  platforms:
+    windows/amd64: metadata-windows.json
+    windows/arm64: metadata-windows.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 0.11.0 floor: 0.10.4 and below use the legacy `nvim-linux64` asset naming
+  # that none of the regexes above match. windows/arm64 has its own 0.11.5 gate
+  # in ../mirror-base.yml.
+  min: "0.11.0"
+  new_per_run: 5
+  poll_interval: "0 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.*` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: neovim/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate. The GitHub API answers NOASSERTION because
+  # upstream's LICENSE.txt is a two-part document, so the id is read off the
+  # file itself (https://github.com/neovim/neovim/blob/master/LICENSE.txt): the
+  # core is Apache-2.0, and the parts contributed under — plus the bundled
+  # `share/nvim/runtime/` inherited from — Vim carry the `Vim` license. The
+  # published bundle contains both, so the expression is a conjunction. See
+  # NOTICE.md for the per-component breakdown.
+  org.opencontainers.image.licenses: "Apache-2.0 AND Vim"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: neovim/neovim
+  fork: ocx-contrib/index

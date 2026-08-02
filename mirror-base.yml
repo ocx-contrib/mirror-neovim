@@ -1,0 +1,105 @@
+# Shared base for every spec in this repository (neovim).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# metadata, catalog, tests, versions, announce, annotations — stays in that
+# package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. Restate
+# `platforms:` IN FULL or not at all.
+
+skip_prereleases: true
+cascade: true
+
+# Kept from the flat layout this repo grew out of, deliberately. The fleet rule
+# is `date`, but this repository already published every 0.11.x/0.12.x version
+# to the flat `ocx.sh/neovim` coordinate under `none`; the grouped coordinate
+# backfills the same version set and there is no reason to change the tag shape
+# mid-mirror. Neovim versions as bare semver, so `date` would also be safe —
+# this is continuity, not a constraint.
+build_timestamp: none
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are ~10–30 MB archives (binary + bundled Lua/vim runtime + treesitter
+  # parsers), each re-compressed whole into a bundle.
+  max_downloads: 8
+  max_bundles: 4
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# `verify`, not `off`: the binary set is PLATFORM-ASYMMETRIC. Linux and macOS
+# ship exactly `bin/nvim`; Windows ships `nvim.exe`, `win32yank.exe`, `xxd.exe`
+# and (from v0.11.6) `tee.exe` in the same `bin/`. Two metadata files carry the
+# two claims, and `verify` diffs each against the real tree, so an upstream
+# rearrangement reds the run instead of drifting silently. The interface PATH
+# entry is `${installPath}/bin` on every platform, which is what makes the scan
+# legal at all (a bare `${installPath}` is rejected at spec load, exit 65).
+bin_scan: verify
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built. Both Linux builds are DYNAMICALLY LINKED against
+# glibc (measured on v0.12.4; evidence above neovim/mirror.yml's `assets:`), so
+# both Linux keys carry `+libc.glibc`. Upstream publishes no musl build, so
+# there is no counterpart key to split against — the glibc keys are the whole
+# Linux surface.
+#
+# The bare `linux/amd64` / `linux/arm64` keys this repo shipped before were a
+# FALSE claim: an empty `os.features` list means "demands nothing of the host",
+# which matches musl hosts the artifact cannot load on.
+#
+# Container legs follow from what the key CLAIMS: `+libc.glibc` → ubuntu +
+# fedora (two glibc vintages), and NO alpine. The renderer rejects an alpine
+# leg on a glibc key (exit 65), and a glibc-linked binary genuinely cannot run
+# there. The one non-base DT_NEEDED is `libgcc_s.so.1`, present in both base
+# images, so neither leg needs an install step.
+platforms:
+  "linux/amd64+libc.glibc":
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "fedora:40",    shell: bash }
+  "linux/arm64+libc.glibc":
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "fedora:40",    shell: bash }
+  darwin/amd64:
+    # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 — GitHub's
+    # native macos-13 Intel pool is exhausted and deadlocks the push job.
+    runner: macos-14
+    prefix: ["arch", "-x86_64"]
+  darwin/arm64:
+    runner: macos-14
+    shell: bash
+  windows/amd64:
+    runner: windows-latest
+    shell: pwsh
+  windows/arm64:
+    # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
+    runner: windows-11-arm
+    shell: pwsh
+    # `nvim-win-arm64.zip` first ships at v0.11.5 (absent v0.11.0..v0.11.4).
+    # Gated here rather than by a global `versions.min` bump, so the linux,
+    # darwin and windows/amd64 legs keep their 0.11.0 floor.
+    min_version: "0.11.5"
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures

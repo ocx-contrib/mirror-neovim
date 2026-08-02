@@ -1,0 +1,14 @@
+{
+  "type": "bundle",
+  "version": 1,
+  "binaries": ["nvim", "tee", "win32yank", "xxd"],
+  "env": [
+    {
+      "key": "PATH",
+      "type": "path",
+      "required": true,
+      "value": "${installPath}/bin",
+      "visibility": "public"
+    }
+  ]
+}
